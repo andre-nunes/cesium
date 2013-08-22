@@ -85,39 +85,26 @@ define(['../Core/createGuid',
 
     //Helper functions
     function readCoordinates(el) {
-        var text = "", coords = [], i;
+        var text = "", coords = [], i, k;
+        var str2float = function(str) {
+            return str.split(/,/).map(function(fs){return parseFloat(fs);});
+        };
+
         for (i = 0; i < el.childNodes.length; i++) {
             text = text + el.childNodes[i].nodeValue;
         }
-        var coordsArray = text.split(/[\s\n]+/);
-        var len = coordsArray.length;
-        for (i = 0; i < len; i++){
-            var string = coordsArray.shift();
-            if (string.length > 0){ //empty string?
-                coordsArray.push(string);
-            }
-        }
-        var finalCoords = [];
-        for (var j = 0; coordsArray[j]; j++){
-            var regExp = /(\-?\+?[0-9]+\.?[0-9]*)(,\-?\+?[0-9]+\.?[0-9]*)(,[0-9]+\.?[0-9]?)?$/;
-            coords[j] = regExp.exec(coordsArray[j]);
-            coords[j].shift(); //the first element is not needed, remove it
-            finalCoords.push([]); //new inner array
-            finalCoords[j][0] = parseFloat(coords[j][0], 10);
-            finalCoords[j][1] = parseFloat(coords[j][1].substring(1), 10);
-            if (typeof coords[j][2] !== 'undefined'){ // altitude given?
-                finalCoords[j][2] = parseFloat(coords[j][2].substring(1), 10);
-            }
-        }
-        for (var k = 0; k < finalCoords.length; k++){
+
+        // list of string -> list of float array
+        var finalCoords = text.trim().split(/[\s]+/).map( str2float );
+
+        // post check
+        for (k = 0; k < finalCoords.length; k++){
             if (isNaN(finalCoords[k][0]) || isNaN(finalCoords[k][1])) {
                 throw new DeveloperError('Longitude and latitude are required.');
             }
         }
-        if (finalCoords.length === 1){
-            return finalCoords[0]; //single tuple
-        }
-        return finalCoords;
+
+        return finalCoords.length === 1 ? finalCoords[0] : finalCoords;
     }
 
     function crsFunction(coordinates) {
