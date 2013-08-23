@@ -69,7 +69,6 @@ define(['../Core/createGuid',
 
 
 
-
     // *** KmlDataSource *** //
 
     var KmlDataSource = function(){
@@ -82,27 +81,31 @@ define(['../Core/createGuid',
         var _timeVarying = true;
 
 
-
-
         var loadKML = function(kml, sourceUri) {
             var dynamicObjectCollection = _dynamicObjectCollection;
             var styleCollection = new DynamicObjectCollection();
 
             var _self = this;
+
+            var populatePlacemark = function(placemark) {
+                var placemarkId = typeof placemark.id !== 'undefined' ? placemark.id : createGuid();
+                var placemarkDynamicObject = dynamicObjectCollection.getOrCreateObject(placemarkId);
+
+                KmlGeometryProcessor.retrievePlacemarkType(placemarkDynamicObject, placemark);
+
+                KmlStyleProcessor.processInlineStyles(placemarkDynamicObject, placemark, styleCollection);
+                KmlGeometryProcessor.processPlacemark(_self, placemarkDynamicObject, placemark);
+            };
+
             //Since KML external styles can be asynchonous, we start off
-            //my loading all styles first, before doing anything else.
+            //by loading all styles first, before doing anything else.
             //The rest of the loading code is synchronous
             return when.all(
                 KmlStyleProcessor.processStyles(kml, styleCollection),
                 function() {
                     var array = kml.getElementsByTagName('Placemark');
                     for ( var i = 0, len = array.length; i < len; i++) {
-                        var placemark = array[i];
-                        var placemarkId = typeof placemark.id !== 'undefined' ? placemark.id : createGuid();
-                        var placemarkDynamicObject = dynamicObjectCollection.getOrCreateObject(placemarkId);
-
-                        KmlStyleProcessor.processInlineStyles(placemarkDynamicObject, array[i], styleCollection);
-                        KmlGeometryProcessor.processPlacemark(_self, placemarkDynamicObject, placemark, dynamicObjectCollection, styleCollection);
+                        populatePlacemark(array[i]);
                     }
 
                     _changed.raiseEvent(_self);
@@ -270,11 +273,6 @@ define(['../Core/createGuid',
 
         // -- private section
 
-        var _str2float = function(str) {
-            return str.split(/,/).map(function(fs){return parseFloat(fs);});
-        };
-
-
         var _crs = function(coordinates) {
             var cartographic = Cartographic.fromDegrees(coordinates[0], coordinates[1], coordinates[2]);
             return Ellipsoid.WGS84.cartographicToCartesian(cartographic);
@@ -316,7 +314,12 @@ define(['../Core/createGuid',
             }
 
             // list of string -> list of float array
-            var finalCoords = text.trim().split(/[\s]+/).map( _str2float );
+            // ["1,2,3", "4,5,6", ...] -> [[1,2,3], [4,5,6], ...]
+            var finalCoords = text.trim().split(/[\s]+/).map( function(str) {
+                return str.split(/,/).map( function(fs) {
+                    return parseFloat(fs);
+                });
+            } );
 
             // post check
             for (k = 0; k < finalCoords.length; k++){
@@ -403,26 +406,56 @@ define(['../Core/createGuid',
 
 
     var KmlGeometryProcessor = {
-        processPlacemark: function(dataSource, dynamicObject, placemark, dynamicObjectCollection, styleCollection) {
+        // geometryTypes = ['Point', 'LineString', 'LinearRing', 'Polygon', 'MultiGeometry', 'Model'],
+        geometryTypes: ['Point', 'LineString', 'LinearRing', 'Polygon'],
+
+        retrievePlacemarkType: function(dynamicObject, placemark) {
+            if (dynamicObject === null || placemark === null) {
+                throw new DeveloperError("Missing parameters.");
+            }
+
+
+            var node = (function() {
+                var i, j, len = placemark.childNodes.length;
+                for(i=0; i < len; i++){
+                    var node = placemark.childNodes.item(i);
+                    for (j=0; j<KmlGeometryProcessor.geometryTypes.length; j++) {
+                        if (KmlGeometryProcessor.geometryTypes[j] === node.nodeName) {
+                            return node;
+                        }
+                    }
+                }
+
+                throw new DeveloperError("Unable to determine placemark geometry!");
+            })();
+
+            placemark.geometry = node.nodeName;
+            placemark.geomNode = node;
+
+            return node;
+        },
+
+
+
+        /**
+         * Processes placemark geometry
+         *
+         * @param {KmlDataSource} dataSource
+         * @param {DynamicObject} dynamicObject
+         * @param {DOM Element} placemark
+         */
+        processPlacemark: function(dataSource, dynamicObject, placemark) {
             dynamicObject.name = getStringValue(placemark, 'name');
             if(typeof dynamicObject.label !== 'undefined'){
                 dynamicObject.label.text = new ConstantProperty(dynamicObject.name);
             }
-            // I want to iterate over every placemark
-            for(var i = 0, len = placemark.childNodes.length; i < len; i++){
-                var node = placemark.childNodes.item(i);
-                //Checking if the node holds a supported Geometry type
-                if(KmlGeometryProcessor.hasOwnProperty('process'+node.nodeName)){
-                    placemark.geometry = node.nodeName;
-                    var geometryType = placemark.geometry;
-                    var geometryHandler = KmlGeometryProcessor['process'+geometryType];
-                    if (typeof geometryHandler === 'undefined') {
-                        throw new DeveloperError('Unknown geometry type: ' + geometryType);
-                    }
-                    geometryHandler(dataSource, dynamicObject, placemark, node);
-                }
+
+            if (placemark.geometry === undefined ) {
+                KmlGeometryProcessor.retrievePlacemarkType(dynamicObject, placemark);
             }
 
+            // process geometry
+            KmlGeometryProcessor['process'+placemark.geometry](dataSource, dynamicObject, placemark, placemark.geomNode);
         },
 
         processPoint: function(dataSource, dynamicObject, kml, node) {
@@ -591,7 +624,7 @@ define(['../Core/createGuid',
         },
 
         //Processes all shared and external styles and stores
-        //their id into the rovided styleCollection.
+        //their id into the provided styleCollection.
         //Returns an array of promises that will resolve when
         //each style is loaded.
         processStyles: function (kml, styleCollection, sourceUri) {
