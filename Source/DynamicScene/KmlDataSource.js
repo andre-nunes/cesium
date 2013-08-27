@@ -68,7 +68,6 @@ define(['../Core/createGuid',
 
 
 
-
     // *** KmlDataSource *** //
 
     var KmlDataSource = function(){
@@ -76,7 +75,7 @@ define(['../Core/createGuid',
 
         var _changed = new Event();
         var _error = new Event();
-        var _clock = undefined;
+        // var _clock = undefined;
         var _dynamicObjectCollection = new DynamicObjectCollection();
         var _timeVarying = true;
 
@@ -93,7 +92,8 @@ define(['../Core/createGuid',
 
                 KmlGeometryProcessor.retrievePlacemarkType(placemarkDynamicObject, placemark);
 
-                KmlStyleProcessor.processInlineStyles(placemarkDynamicObject, placemark, styleCollection);
+                // KmlStyleProcessor.processInlineStyles(placemarkDynamicObject, placemark, styleCollection);
+                KmlStyleProcessor.applyStyles(placemarkDynamicObject, placemark, styleCollection);
                 KmlGeometryProcessor.processPlacemark(_self, placemarkDynamicObject, placemark);
             };
 
@@ -205,12 +205,12 @@ define(['../Core/createGuid',
                 throw new DeveloperError('url is required.');
             }
 
-            var _self = this;
+            var that = this;
 
             return when(loadXML(url), function(kml) {
-                return _self.load(kml, url);
+                return that.load(kml, url);
             }, function(error) {
-                _error.raiseEvent(dataSource, error);
+                _error.raiseEvent(that, error);
                 return when.reject(error);
             });
         };
@@ -269,7 +269,7 @@ define(['../Core/createGuid',
 
 
     var KmlCoordUtil = (function() {
-        var self = {};
+        var that = {};
 
         // -- private section
 
@@ -306,7 +306,7 @@ define(['../Core/createGuid',
          *
          * @exception {DeveloperError} Longitude and latitude are required.
          */
-        self.readCoordinates = function(el) {
+        that.readCoordinates = function(el) {
             var text = "", coords = [], i, k;
 
             for (i = 0; i < el.childNodes.length; i++) {
@@ -339,7 +339,7 @@ define(['../Core/createGuid',
          *
          * @return {Array} of cartographic coordinates
          */
-        self.readMultipleCoordinates = function(el) {
+        that.readMultipleCoordinates = function(el) {
             var coordinates = [];
             for (var j = 0; j < el.length; j++) {
                 coordinates = coordinates.concat(this.readCoordinates(el[j]));
@@ -348,7 +348,7 @@ define(['../Core/createGuid',
         };
 
 
-        return self;
+        return that;
     })();
 
 
@@ -525,6 +525,12 @@ define(['../Core/createGuid',
 
 
     var KmlStyleProcessor = {
+        /**
+         * 
+         *
+         * @param {KML Node}      styleNode      Source DOM node
+         * @param {DynamicObject} dynamicObject  Target object
+         */
         processStyle: function (styleNode, dynamicObject) {
             for(var i = 0, len = styleNode.childNodes.length; i < len; i++){
                 var node = styleNode.childNodes.item(i);
@@ -591,7 +597,14 @@ define(['../Core/createGuid',
             }
         },
 
-        //Processes and merges any inline styles for the provided node into the provided dynamic object.
+        /**
+         * Processes and merges any inline styles for the provided node into
+         * the provided dynamic object.
+         *
+         * @param {DynamicObject}  dynamicObject    Target object
+         * @param {KML Node}       node             Source DOM Node
+         * @param {Array}          styleCollection  Collection of shared styles
+         */
         processInlineStyles: function(dynamicObject, node, styleCollection) {
             //KML_TODO Validate the behavior for multiple/conflicting styles.
             var inlineStyles = node.getElementsByTagName('Style');
@@ -616,6 +629,46 @@ define(['../Core/createGuid',
             }
         },
 
+
+        /**
+         * Apply styles to placemark
+         *
+         * @param {DynamicObject}            dynamicObject    Target object
+         * @param {KML Node}                 kmlNode          Original Placemark object
+         * @param {DynamicObjectCollection}  styleCollection  Collection of shared styles
+         */
+        applyStyles: function(dynamicObject, kmlNode, styleCollection) {
+            //KML_TODO Validate the behavior for multiple/conflicting styles.
+            var styleObj = new DynamicObject();
+
+            // collect all styles and apply a pure object
+            KmlStyleProcessor.processInlineStyles(styleObj, kmlNode, styleCollection);
+
+            // now carefully select and apply the only needed ones
+            // ['Point', 'LineString', 'LinearRing', 'Polygon']
+            switch (kmlNode.geometry) {
+                case 'Point':
+                    DynamicBillboard.mergeProperties(dynamicObject, styleObj);
+                    break;
+                case 'LinearRing':
+                    // FIXME - should be handled together with polygons
+                    break;
+                case 'LineString':
+                    DynamicPolyline.mergeProperties(dynamicObject, styleObj);
+                    break;
+                case 'Polygon':
+                    DynamicPolygon.mergeProperties(dynamicObject, styleObj);
+                    break;
+                default:
+                    // No such type
+                    break;
+            }
+            // ??
+            DynamicPoint.mergeProperties(dynamicObject, styleObj);
+            DynamicObject.mergeProperties(dynamicObject, styleObj);
+        },
+
+
         //Asynchronously processes an external style file.
         processExternalStyles: function(uri, styleCollection) {
             return when(loadXML(uri), function(styleKml) {
@@ -627,9 +680,11 @@ define(['../Core/createGuid',
         //their id into the provided styleCollection.
         //Returns an array of promises that will resolve when
         //each style is loaded.
+        // @return {Array} of promises
         processStyles: function (kml, styleCollection, sourceUri) {
             var i;
 
+            // Step #1 - process Style nodes
             var styleNodes = kml.getElementsByTagName('Style');
             var styleNodesLength = styleNodes.length;
             for (i = styleNodesLength - 1; i >= 0; i--) {
@@ -648,10 +703,12 @@ define(['../Core/createGuid',
                 }
             }
 
+            // Step #2 - process styleUrl referred external styles
             var externalStyleHash = {};
             var promises = [];
             var styleUrlNodes = kml.getElementsByTagName('styleUrl');
             var styleUrlNodesLength = styleUrlNodes.length;
+            var baseUri = new Uri(document.location.href);
             for (i = 0; i < styleUrlNodesLength; i++) {
                 var styleReference = styleUrlNodes[i].textContent;
                 if (styleReference[0] !== '#') {
@@ -662,7 +719,6 @@ define(['../Core/createGuid',
                     var uri = tokens[0];
                     if (typeof externalStyleHash[uri] === 'undefined') {
                         if (typeof sourceUri !== 'undefined') {
-                            var baseUri = new Uri(document.location.href);
                             sourceUri = new Uri(sourceUri);
                             uri = new Uri(uri).resolve(sourceUri.resolve(baseUri)).toString();
                         }
