@@ -22,7 +22,8 @@ define(['../Core/createGuid',
         './DynamicLabel',
         './DynamicBillboard',
         '../ThirdParty/when',
-        '../ThirdParty/Uri'
+        '../ThirdParty/Uri',
+        './processGxTour'
     ], function(
         createGuid,
         Cartographic,
@@ -47,7 +48,8 @@ define(['../Core/createGuid',
         DynamicLabel,
         DynamicBillboard,
         when,
-        Uri) {
+        Uri,
+        GxTourProcessor) {
     "use strict";
 
     // *** ConstantPosition *** //
@@ -79,12 +81,13 @@ define(['../Core/createGuid',
         var _dynamicObjectCollection = new DynamicObjectCollection();
         var _timeVarying = true;
 
+        var _animation;
+
+        var that = this;
 
         var loadKML = function(kml, sourceUri) {
             var dynamicObjectCollection = _dynamicObjectCollection;
             var styleCollection = new DynamicObjectCollection();
-
-            var _self = this;
 
             var populatePlacemark = function(placemark) {
                 var placemarkId = typeof placemark.id !== 'undefined' ? placemark.id : createGuid();
@@ -94,7 +97,7 @@ define(['../Core/createGuid',
 
                 // KmlStyleProcessor.processInlineStyles(placemarkDynamicObject, placemark, styleCollection);
                 KmlStyleProcessor.applyStyles(placemarkDynamicObject, placemark, styleCollection);
-                KmlGeometryProcessor.processPlacemark(_self, placemarkDynamicObject, placemark);
+                KmlGeometryProcessor.processPlacemark(that, placemarkDynamicObject, placemark);
             };
 
             //Since KML external styles can be asynchonous, we start off
@@ -108,7 +111,21 @@ define(['../Core/createGuid',
                         populatePlacemark(array[i]);
                     }
 
-                    _changed.raiseEvent(_self);
+                    var processor;
+                    var result;
+                    // process gx:Tour
+                    array = kml.getElementsByTagNameNS(GxTourProcessor.GX_NS, 'Tour');
+                    if (array.length === 1) {
+                        processor = new GxTourProcessor();
+                        processor.processTour(array[0]);
+                        result = processor.getPlaylist();
+
+                        // TBD
+                        // animation = {tour: [{type: 'wait', duration: 1}, {type: 'flyTo', ....}, {}, ...]}
+                        _animation = {tour: result};
+                    }
+
+                    _changed.raiseEvent(that);
                 }
             );
         };
@@ -172,6 +189,17 @@ define(['../Core/createGuid',
          */
         this.getIsTimeVarying = function() {
             return _timeVarying;
+        };
+
+
+        /**
+         * !EXPERIMENTAL!
+         *
+         * Return animation items (if available)
+         * 
+         */
+        this.getAnimation = function() {
+            return _animation;
         };
 
         /**
