@@ -22,8 +22,7 @@ define(['../Core/createGuid',
         './DynamicLabel',
         './DynamicBillboard',
         '../ThirdParty/when',
-        '../ThirdParty/Uri',
-        './processGxTour'
+        '../ThirdParty/Uri'
     ], function(
         createGuid,
         Cartographic,
@@ -77,11 +76,9 @@ define(['../Core/createGuid',
 
         var _changed = new Event();
         var _error = new Event();
-        // var _clock = undefined;
+        var _clock;
         var _dynamicObjectCollection = new DynamicObjectCollection();
         var _timeVarying = true;
-
-        var _animation;
 
         var that = this;
 
@@ -109,20 +106,6 @@ define(['../Core/createGuid',
                     var array = kml.getElementsByTagName('Placemark');
                     for ( var i = 0, len = array.length; i < len; i++) {
                         populatePlacemark(array[i]);
-                    }
-
-                    var processor;
-                    var result;
-                    // process gx:Tour
-                    array = kml.getElementsByTagNameNS(GxTourProcessor.GX_NS, 'Tour');
-                    if (array.length === 1) {
-                        processor = new GxTourProcessor();
-                        processor.processTour(array[0]);
-                        result = processor.getPlaylist();
-
-                        // TBD
-                        // animation = {tour: [{type: 'wait', duration: 1}, {type: 'flyTo', ....}, {}, ...]}
-                        _animation = {tour: result};
                     }
 
                     _changed.raiseEvent(that);
@@ -191,16 +174,6 @@ define(['../Core/createGuid',
             return _timeVarying;
         };
 
-
-        /**
-         * !EXPERIMENTAL!
-         *
-         * Return animation items (if available)
-         * 
-         */
-        this.getAnimation = function() {
-            return _animation;
-        };
 
         /**
          * Replaces any existing data with the provided KML.
